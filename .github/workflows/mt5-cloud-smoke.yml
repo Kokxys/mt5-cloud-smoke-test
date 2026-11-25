@@ -34,12 +34,25 @@ jobs:
             }
           }
           Require-MetaQuotes $setup
-          $p = Start-Process $setup -ArgumentList '/auto',('/path:"' + $install + '"') -PassThru
+          $locations = @($install,(Join-Path $env:ProgramFiles 'MetaTrader 5'),(Join-Path $env:LOCALAPPDATA 'Programs\MetaTrader 5'))
+          $names = @('terminal64.exe','MetaEditor64.exe','metatester64.exe')
+          function Find-Installation {
+            foreach ($dir in $locations) {
+              $missing = @($names | Where-Object { !(Test-Path -LiteralPath (Join-Path $dir $_) -PathType Leaf) })
+              if ($missing.Count -eq 0) { return $dir }
+            }
+          }
+          $p = Start-Process -FilePath $setup -ArgumentList '/auto' -PassThru
           if (!$p.WaitForExit(160000)) { throw 'MT5 installer timed out' }
-          if ($p.ExitCode -ne 0) { throw "MT5 installer exit: $($p.ExitCode)" }
-          foreach ($name in @('terminal64.exe','MetaEditor64.exe','metatester64.exe')) {
-            $file = Join-Path $install $name
-            if (!(Test-Path $file)) { throw "Not installed: $name" }
-            Require-MetaQuotes $file
+          Write-Host "Installer exit: $($p.ExitCode)"
+          $actual = $null
+          $deadline = (Get-Date).AddSeconds(30)
+          do {
+            $actual = Find-Installation
+            if (!$actual) { Start-Sleep -Seconds 2 }
+          } until ($actual -or (Get-Date) -ge $deadline)
+          if (!$actual) { throw 'No supported installation directory contains all three MT5 programs' }
+          foreach ($name in $names) {
+            Require-MetaQuotes (Join-Path $actual $name)
           }
           Write-Host 'METATRADER_INSTALL_AND_SIGNATURES_OK'
