@@ -1,0 +1,40 @@
+name: MT5 cloud smoke test
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency: mt5-cloud-smoke
+jobs:
+  verify:
+    runs-on: windows-2025
+    timeout-minutes: 8
+    steps:
+      - name: Check MetaQuotes demo connectivity and install signed MT5
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $demo = 'access.metatrader5.com'
+          $tcp = [Net.Sockets.TcpClient]::new()
+          try {
+            $tcp.ConnectAsync($demo,443).WaitAsync([TimeSpan]::FromSeconds(15)).GetAwaiter().GetResult()
+            Write-Host 'METATRADER_DEMO_TCP_OK'
+          } finally { $tcp.Dispose() }
+          $install = Join-Path $env:RUNNER_TEMP 'mt5-lab'
+          $setup = Join-Path $env:RUNNER_TEMP 'mt5setup.exe'
+          Invoke-WebRequest -Uri 'https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe' -OutFile $setup -TimeoutSec 45
+          function Require-MetaQuotes([string]$file) {
+            $sig = Get-AuthenticodeSignature -LiteralPath $file
+            if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'CN=MetaQuotes(?: Ltd\.| Software Corp\.)?(?:,|$)') {
+              throw "Expected a valid MetaQuotes signature on $(Split-Path $file -Leaf); found $($sig.Status)"
+            }
+          }
+          Require-MetaQuotes $setup
+          $p = Start-Process $setup -ArgumentList '/auto',('/path:"' + $install + '"') -PassThru
+          if (!$p.WaitForExit(160000)) { throw 'MT5 installer timed out' }
+          if ($p.ExitCode -ne 0) { throw "MT5 installer exit: $($p.ExitCode)" }
+          foreach ($name in @('terminal64.exe','MetaEditor64.exe','metatester64.exe')) {
+            $file = Join-Path $install $name
+            if (!(Test-Path $file)) { throw "Not installed: $name" }
+            Require-MetaQuotes $file
+          }
+          Write-Host 'METATRADER_INSTALL_AND_SIGNATURES_OK'
