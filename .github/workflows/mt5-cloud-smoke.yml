@@ -24,8 +24,13 @@ jobs:
           Invoke-WebRequest -Uri 'https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe' -OutFile $setup -TimeoutSec 45
           function Require-MetaQuotes([string]$file) {
             $sig = Get-AuthenticodeSignature -LiteralPath $file
-            if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'CN=MetaQuotes(?: Ltd\.| Software Corp\.)?(?:,|$)') {
-              throw "Expected a valid MetaQuotes signature on $(Split-Path $file -Leaf); found $($sig.Status)"
+            if ($sig.Status -ne 'Valid' -or !$sig.SignerCertificate) {
+              throw "Invalid signature on $(Split-Path $file -Leaf): $($sig.Status)"
+            }
+            $publisher = $sig.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName,$false)
+            Write-Host "Signed publisher ($(Split-Path $file -Leaf)): $publisher"
+            if ($publisher -notmatch '^MetaQuotes(?: Ltd\.?| Limited| Software Corp\.?)?$') {
+              throw 'Unexpected Authenticode publisher'
             }
           }
           Require-MetaQuotes $setup
